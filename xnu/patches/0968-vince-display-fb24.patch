@@ -28,7 +28,7 @@ index 1d3ee17..714c7eb 100644
  	PE_current_console(&video);
  	fPhys = video.v_baseAddr;
  	fWidth = (uint32_t)video.v_width;
-@@ -477,6 +489,104 @@ AppleCLCD::start(IOService *provider)
+@@ -477,6 +489,111 @@ AppleCLCD::start(IOService *provider)
  	return true;
  }
  
