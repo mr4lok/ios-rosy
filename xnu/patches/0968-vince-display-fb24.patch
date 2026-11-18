@@ -33,11 +33,18 @@ index 1d3ee17..714c7eb 100644
  }
  
 +#if defined(VINCE)
-+/* The panel as LK left it: packed 24 bpp (bytes B, G, R), 1080x2160, in DDR. */
++/* The panel as LK left it: packed 24 bpp (bytes B, G, R), in DDR. */
 +#define VINCE_FB_PHYS           0x90001000ull
++#if defined(ROSY)
++/* rosy (Redmi 5): 5.7" 1440x720 FT8613/FT8006M, LK splash at the same address */
++#define VINCE_FB_W              1440
++#define VINCE_FB_H              720
++#define VINCE_FB_STRIDE         4320
++#else
 +#define VINCE_FB_W              1080
 +#define VINCE_FB_H              2160
 +#define VINCE_FB_STRIDE         3240
++#endif
 +
 +bool
 +AppleCLCD::startVince(void)
