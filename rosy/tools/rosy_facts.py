@@ -33,7 +33,8 @@ _BOARD = dict(
     FB=0x90001000,                          # LK splash buffer left scanned out
     # VERIFIED on the live DTB (mdss_dsi_ft8613_ebbg_5p7_720p_video is the primary
     # panel; touch focaltech,display-coords = <0 0 0x2d0 0x5a0> = 1440x720):
-    FB_W=1440, FB_H=720, FB_STRIDE=1440 * 3,   # 24 bpp packed B,G,R
+    FB_W=720, FB_H=1440, FB_STRIDE=720 * 3,
+    FB_CANVAS_W=1125, FB_CANVAS_H=2436,
     PANEL='ft8613_ebbg 5.7in 720p',
     # VERIFIED on the live DTB (focaltech@38, focaltech,fts, BLSP1 QUP3 / i2c-3):
     TOUCH_IC='FocalTech FTS (FT8006M family)',

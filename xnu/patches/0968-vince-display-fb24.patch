@@ -36,8 +36,7 @@ index 1d3ee17..714c7eb 100644
 +/* The panel as LK left it: packed 24 bpp (bytes B, G, R), in DDR. */
 +#define VINCE_FB_PHYS           0x90001000ull
 +#if defined(ROSY)
-+/* rosy (Redmi 5): 5.7" 720x1440 FT8613/FT8006M portrait panel (DTB
-+ * qcom,mdss-dsi-panel-width/height = 0x2d0/0x5a0), LK splash at 0x90001000. */
++/* rosy (Redmi 5): 5.7" 720x1440 FT8613/FT8006M (DTB 0x2d0 x 0x5a0) */
 +#define VINCE_FB_W              720
 +#define VINCE_FB_H              1440
 +#define VINCE_FB_STRIDE         2160
