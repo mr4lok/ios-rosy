@@ -1,0 +1,42 @@
+# rosy live device facts (measured 2026-11-18)
+
+fastboot
+  product          : rosy
+  serialno         : 68497977d250
+  unlocked         : yes
+  secure           : yes
+  variant          : QRD eMMC
+  userdata         : ext4, 0x60bbfbe00 (~24.2 GiB)
+  max-download-size: 0x1fe00000
+
+Android (MIUI V11.0.2.0.ODAMIXM, Android 8.1.0, build type user)
+  ro.product.device : rosy   ro.product.model : Redmi 5
+  ro.product.board  : msm8953
+  adb root          : refused ("production builds"), no su present
+
+Touch (authoritative)
+  name : fts_ts            (FocalTech FT8006M, matches CONFIG_TOUCHSCREEN_FT8006M)
+  bus  : i2c-3 @ 0x38      sysfs /devices/soc/78b7000.i2c/i2c-3/3-0038/input/input1
+  (BLSP1 QUP3, 0x78b7000 -- same bus the vince port used)
+
+Framebuffer
+  /proc/device-tree/reserved-memory/splash_region@0x90001000  -> FB = 0x90001000
+  (same address as vince/daisy; node name readable without root)
+
+Partitions (/dev/block/bootdevice/by-name)
+  boot      -> mmcblk0p21   (64 MiB)
+  recovery  -> mmcblk0p22
+  system    -> mmcblk0p24
+  persist   -> mmcblk0p26
+  userdata  -> mmcblk0p49   (25358319 KiB ~ 24.2 GiB)
+  modem     -> mmcblk0p1    modemst1 p13  modemst2 p14
+
+Not readable without root (production build)
+  /proc/iomem, /sys/firmware/fdt, /sys/class/graphics/fb0/*, dmesg
+
+Boot experiments
+  fastboot boot <html file>   -> FAILED (remote: 'dtb not found')  (protocol OK)
+  fastboot boot twrp-3.7.0   -> "Booting FAILED (usb_read failed: No such device)"
+                              device then enumerated as 05c6:900e (Qualcomm EDL)
+  Nothing was written; fastboot boot is RAM only. Device needs a hardware
+  force-reboot (hold Power) to leave EDL.

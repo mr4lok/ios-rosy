@@ -1,0 +1,29 @@
+# rosy-port status 2026-11-19 06:05
+
+STAGED AND VERIFIED
+  kernel   upstream/xnu-kernel-rosy/kernel.development.sweet  17,785,392 B
+           XNU xnu-8796, GH Actions run 44370838757 (macos-15, 4 KiB pages)
+  loader   upstream/rosy-loader.Image  61,440 B (arm64, panel 1440x720)
+  dtb      upstream/rosy-stock.dtb  257,856 B (from the stock ROM boot.img)
+  boot     upstream/rosy-boot.img  17,461,248 B (ANDROID! v0, page 2048)
+  root     upstream/ios16-root.img  20 G HFS+ (fsck clean, 15 G used / 5.3 G free)
+  root sp  upstream/ios16-root.simg  15,410,039,500 B (magic ed26ff3a, 4096 B blocks)
+
+RUNBOOK notes/RUNBOOK.md ; one-shot tools/flash-and-boot.sh
+
+PHONE
+  rosy, fastboot, unlocked, serial 68497977d250. Nothing written to it yet.
+
+TODO (needs the user)
+  * approve the destructive `fastboot flash userdata` (wipes Android data)
+  * first `fastboot boot` (a failure can drop the phone to EDL; Power recovers)
+  * then: FocalTech FT8006M touch driver, cpus=8, Adreno 506 + Mesa GPU path
+
+LESSONS
+  * Editing a .patch by hand: the @@ -a,b +c,d @@ counts must be updated or
+    git apply calls the patch "corrupt". rsync --mkpath (3.2.7: flag, no arg)
+    replaces `sudo mkdir -p` when sudo is command-whitelisted.
+  * Xiaomi LK `fastboot boot` with a recovery image dropped the phone to EDL
+    (05c6:900e); recover with a 15 s Power hold.
+  * img2simg: apt package android-sdk-libsparse-utils (extract the debs if the
+    mirror DNS is down).

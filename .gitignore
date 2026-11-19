@@ -8,3 +8,17 @@ shim/out/
 xnu/out/
 xnu/out-*/
 __pycache__/
+# rosy build artifacts / vendor + Apple files (never commit)
+*.ipsw
+ipsw-dmg/
+llvm*.tar.xz
+rosy_V11*.tgz
+rom-boot.img
+twrp*.img
+rosy-loader.Image
+rosy-stock.dtb
+xnu-kernel/
+xnu-kernel-*/
+ios16-root.img
+ios16-root.simg
+liblzfse.so*
