@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ace <ace@localhost>
+Date: Fri, 21 Nov 2026 00:00:00 +0000
+Subject: [PATCH] rosy: do the console handover before present() early-returns
+
+1001 put the handover in the copy path of AppleCLCD::present(), after the
+directPresent() / vinceZeroPresent() early returns. Those set fConsolePaused
+themselves, so the first frame takes one of them and the handover never runs:
+boot20's log has no "kPEDisableScreen" line and the boot bar still climbs.
+
+Put it at the top of present() so it runs on the first frame either way.
+diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
+index 10c6a73..ec4d8e4 100644
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -1863,6 +1863,21 @@ AppleCLCD::directPresent(const uint8_t *rec)
+ void
+ AppleCLCD::present(const uint8_t *rec)
+ {
++	/*
++	 * The GUI's first frame: hand the panel over. This has to run before the early
++	 * returns below - vinceZeroPresent() and directPresent() set fConsolePaused
++	 * themselves, so a handover placed after them never happens.
++	 */
++	if (!fConsolePaused) {
++		int quiet = 0;
++		fConsolePaused = true;
++		if (PE_parse_boot_argn("sweetfb_noconsole", &quiet, sizeof(quiet)) && quiet != 0) {
++			sweet_console_muted = 1;
++			PE_Video video;
++			PE_current_console(&video);
++			PE_initialize_console(&video, kPEDisableScreen);
++		}
++	}
+ 	uint32_t mask = get32(rec, 0x104);
+ 	static int console_only = -1;
+ 
+-- 
+2.43.0
