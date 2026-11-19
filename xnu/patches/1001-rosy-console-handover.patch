@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ace <ace@localhost>
+Date: Thu, 20 Nov 2026 00:00:00 +0000
+Subject: [PATCH] rosy: hand the panel to the GUI (restore kPEDisableScreen)
+
+0067 replaced PE_initialize_console(&video, kPEDisableScreen) with
+sweet_console_muted=1, because the console switch writes cons_ops_index,
+which is SECURITY_READ_ONLY_LATE and panics on the write. Muting only stops
+console *text*: the graphics console keeps the panel, so the boot logo and the
+progress meter stay on the panel over the GUI and iOS never becomes visible.
+
+Make cons_ops_index writable and do the handover again. The mute stays, so
+console text is off the panel either way.
+---
+ osfmk/console/serial_console.c        | 3 ++-
+ iokit/Kernel/arm/SweetFramebuffer.cpp | 8 +++++++-
+ 2 files changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
+index 2039aa0..10c6a73 100644
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -1925,9 +1925,12 @@ AppleCLCD::present(const uint8_t *rec)
+ 		int quiet = 0;
+ 		fConsolePaused = true;
+ 		if (PE_parse_boot_argn("sweetfb_noconsole", &quiet, sizeof(quiet)) && quiet != 0) {
+-			/* Not PE_initialize_console(kPEDisableScreen): its console switch
+-			 * writes the read-only-late cons_ops_index and panics. */
++			/* Hand the panel to the GUI: kPEDisableScreen pauses the graphics
++			 * console (boot logo + progress meter) and stops console output. */
+ 			sweet_console_muted = 1;
++			PE_Video video;
++			PE_current_console(&video);
++			PE_initialize_console(&video, kPEDisableScreen);
+ 		}
+ 	}
+ 
+diff --git a/osfmk/console/serial_console.c b/osfmk/console/serial_console.c
+index d97cba8..a1cc39b 100644
+--- a/osfmk/console/serial_console.c
++++ b/osfmk/console/serial_console.c
+@@ -134,7 +134,8 @@ SECURITY_READ_ONLY_EARLY(uint32_t) nconsops = (sizeof cons_ops / sizeof cons_ops
+ #if __x86_64__
+ uint32_t cons_ops_index = VC_CONS_OPS;
+ #else
+-SECURITY_READ_ONLY_LATE(uint32_t) cons_ops_index = VC_CONS_OPS;
++/* rosy: PE_initialize_console(kPEDisableScreen) writes this on the GUI handover */
++uint32_t cons_ops_index = VC_CONS_OPS;
+ #endif
+ 
+ LCK_GRP_DECLARE(console_lck_grp, "console");
+-- 
+2.43.0
