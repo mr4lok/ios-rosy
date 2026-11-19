@@ -26,6 +26,7 @@ VTIMER_INTID = F.get('VTIMER_INTID')
 FB = F.get('FB')
 FB_SIZE = F.fb_size()
 FB_W, FB_H, FB_STRIDE = F.get('FB_W'), F.get('FB_H'), F.get('FB_STRIDE')
+FB_CANVAS_W, FB_CANVAS_H = F.get('FB_CANVAS_W'), F.get('FB_CANVAS_H')
 ECID = F.get('ECID')
 CPU_CLOCK = F.get('CPU_CLOCK')
 
@@ -107,8 +108,8 @@ def build(seed=None):
             ph(),
             ('device_type', cstr('display-subsystem')),
             ('compatible', cstr('sweet,display')),
-            ('canvas-width', u32(FB_W)),
-            ('canvas-height', u32(FB_H)),
+            ('canvas-width', u32(FB_CANVAS_W)),
+            ('canvas-height', u32(FB_CANVAS_H)),
         ]),
         # launchd only starts wifid when the tree has a "wlan" node.
         node('wlan', [
