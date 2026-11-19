@@ -98,8 +98,24 @@ def build(seed=None):
         ('ranges', u64(0, SOC_BASE, 0x100000000 - SOC_BASE)),
     ], [gic,
         # No hardware: watchdogd checks IODeviceTree:/arm-io/wdt for no-pmu.
-        node('wdt', [ph(), ('no-pmu', u32(1))])])
-    # Deliberately absent: disp0, wlan, sweet-ufs (drivers would poke absent hardware).
+        node('wdt', [ph(), ('no-pmu', u32(1))]),
+        # Main display. IOMobileFramebuffer.framework counts /arm-io children
+        # whose device_type is "display-subsystem" and reads the canvas size
+        # from the node; the kernel's AppleCLCD matches "sweet,display".
+        # Without this SpringBoard has no CADisplay and crash-loops.
+        node('disp0', [
+            ph(),
+            ('device_type', cstr('display-subsystem')),
+            ('compatible', cstr('sweet,display')),
+            ('canvas-width', u32(FB_W)),
+            ('canvas-height', u32(FB_H)),
+        ]),
+        # launchd only starts wifid when the tree has a "wlan" node.
+        node('wlan', [
+            ph(),
+            ('device_type', cstr('wlan')),
+            ('compatible', cstr('topaz,wcn3988')),
+        ])])
 
     fbcon = node('sweet-fbcon', [
         ph(),
