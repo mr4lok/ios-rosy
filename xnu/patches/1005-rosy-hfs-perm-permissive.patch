@@ -1,0 +1,31 @@
+From: rosy-port <ace@localhost>
+Subject: [PATCH] rosy: permissive HFS owner rights (bring-up hammer)
+
+accountsd cannot create /var/mobile/Library/Accounts: the parent is mode 0711
+uid 501 and the POSIX check in vnode_authorize_posix() only grants write to
+the owner, so any caller whose uid is not 501 (or any directory whose
+ca_uid is not the caller's uid) is denied.  MNT_UNKNOWNPERMISSIONS already
+has a "report the caller's own uid as the owner" mode; this makes that
+behaviour unconditional so every directory looks owned by the caller.
+
+This is a bring-up hammer, the same spirit as upstream patch 0050 (permissive
+Sandbox MAC policy).  Remove once the real owner/uid mismatch is understood.
+
+---
+--- a/bsd/sweet_hfs/core/hfs_attrlist.c
++++ b/bsd/sweet_hfs/core/hfs_attrlist.c
+@@ -1485,12 +1485,10 @@ get_vattr_data_for_common_attrs(struct attrlist *alp, struct vnode_attr *vap,
+ 	if (ATTR_CMN_OWNERID & attr) {
+ 		uid_t nuid = cap->ca_uid;
+ 
+ 		if (!isroot) {
+-			if (((unsigned int)vfs_flags(HFSTOVFS(hfsmp))) & MNT_UNKNOWNPERMISSIONS)
+-				nuid = cuid;
+-			else if (nuid == UNKNOWNUID)
+-				nuid = cuid;
++			/* ROSY: report the caller as the owner (permissive bring-up) */
++			nuid = cuid;
+ 		}
+ 
+ 		vap->va_uid = nuid;
+ 		VATTR_SET_SUPPORTED(vap, va_uid);

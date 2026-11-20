@@ -1,0 +1,37 @@
+From: rosy-port <ace@localhost>
+Subject: [PATCH] rosy: trace directory-create permission failures
+
+Debug patch, no gating (noise is fine for a debug boot).  Logs for every
+denied mkdir: the caller's uid/gid, the parent directory's mode/uid/gid as
+the kernel sees them, and the errno.  Needed because accountsd aborts on
+ACDServerCreateDirectory('/var/mobile/Library/Accounts') with
+NSFileWriteNoPermissionError while the image shows mode 0711 uid 501.
+
+---
+--- a/bsd/vfs/vfs_subr.c
++++ b/bsd/vfs/vfs_subr.c
+@@ -8336,8 +8336,24 @@ vn_authorize_mkdir(vnode_t dvp, struct componentname *cnp, struct vnode_attr *vap
+ 	/* authorize addition of a directory to the parent */
+ 	if ((error = vnode_authorize(dvp, NULL, KAUTH_VNODE_ADD_SUBDIRECTORY, ctx)) != 0) {
+ 		goto out;
+ 	}
+ 
+ out:
++	if (error) {
++		kauth_cred_t _cr = vfs_context_ucred(ctx);
++		struct vnode_attr _va;
++		VATTR_INIT(&_va);
++		VATTR_WANTED(&_va, va_mode);
++		VATTR_WANTED(&_va, va_uid);
++		VATTR_WANTED(&_va, va_gid);
++		_va.va_mode = 0; _va.va_uid = -1; _va.va_gid = -1;
++		(void)vnode_getattr(dvp, &_va, ctx);
++		printf("ROSY MKDIR DENY '%s' err %d caller uid %d gid %d parent mode 0x%x uid %d gid %d mntflags 0x%x\n",
++		    (cnp && cnp->cn_nameptr) ? cnp->cn_nameptr : "?",
++		    error,
++		    (int)kauth_cred_getuid(_cr), (int)kauth_cred_getgid(_cr),
++		    (unsigned)_va.va_mode, (int)_va.va_uid, (int)_va.va_gid,
++		    (unsigned)vfs_flags(vnode_mount(dvp)));
++	}
+ 	return error;
+ }
