@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ace <ace@localhost>
+Date: Fri, 21 Nov 2026 01:00:00 +0000
+Subject: [PATCH] rosy: log the console handover
+
+PE_initialize_console's own "kPEDisableScreen" kprintf goes to the serial console
+after switch_to_serial_console(), so it never reaches the sweet log. Add explicit
+IOLog lines instead: one at the first present() (with fConsolePaused) and one when
+the handover actually runs.
+diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
+index ec4d8e4..442f40b 100644
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -1872,12 +1872,18 @@ AppleCLCD::present(const uint8_t *rec)
+ 		int quiet = 0;
+ 		fConsolePaused = true;
+ 		if (PE_parse_boot_argn("sweetfb_noconsole", &quiet, sizeof(quiet)) && quiet != 0) {
++			IOLog("SWEET FB: first GUI frame -> console handover\n");
+ 			sweet_console_muted = 1;
+ 			PE_Video video;
+ 			PE_current_console(&video);
+ 			PE_initialize_console(&video, kPEDisableScreen);
+ 		}
+ 	}
++	static int first_present = -1;
++	if (first_present < 0) {
++		first_present = 1;
++		IOLog("SWEET FB: first present, fConsolePaused=%d\n", (int)fConsolePaused);
++	}
+ 	uint32_t mask = get32(rec, 0x104);
+ 	static int console_only = -1;
+ 
+-- 
+2.43.0
