@@ -25,7 +25,9 @@ KERNEL_ADDR = 0x80008000
 RAMDISK_ADDR = 0x81000000
 SECOND_ADDR = 0x80f00000
 TAGS_ADDR = 0x80000100
-LK_RAMDISK_PA = 0x13600000
+# rosy's LK loads the boot image's ramdisk here (seen on the loader console);
+# the payload lives in that ramdisk.
+LK_RAMDISK_PA = 0x43600000
 OS_VERSION = 0x2000019B
 CMDLINE = (b"androidboot.hardware=qcom msm_rtb.filter=0x237 ehci-hcd.park=3 "
            b"lpm_levels.sleep_disabled=1 androidboot.bootdevice=7824900.sdhci "
@@ -34,7 +36,7 @@ CMDLINE = (b"androidboot.hardware=qcom msm_rtb.filter=0x237 ehci-hcd.park=3 "
            b"earlycon=msm_serial_dm,0x78af000 ")
 DEFAULT_CMDLINE = ('debug=0xc serial=3 cpus=1 keepsyms=1 rd=emmcroot0 emmcrw=1 rootrw=1 '
                    'unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin '
-                   'launchd_unsecure_cache=1 wdt=-1')
+                   'launchd_unsecure_cache=1 wdt=-1 gpu=1')
 
 
 def pad(b):
@@ -80,10 +82,12 @@ def main():
         payload, info = mkpayload.build(a.kernel, adt_path, a.cmdline, a.ramdisk)
 
     phys_base, mem_size = mkadt_rosy.PHYS_BASE, mkadt_rosy.MEM_SIZE
-    limit = phys_base - LK_RAMDISK_PA
-    if len(payload) > limit:
-        sys.exit(f'payload is {len(payload):#x} bytes, but only {limit:#x} fit between the '
-                 f'ramdisk address {LK_RAMDISK_PA:#x} and the kernel RAM at {phys_base:#x}')
+    # the payload sits in the ramdisk LK loaded at LK_RAMDISK_PA; it must not
+    # overlap the RAM window handed to xnu
+    if (LK_RAMDISK_PA < phys_base + mem_size and
+            LK_RAMDISK_PA + len(payload) > phys_base):
+        sys.exit(f'payload at {LK_RAMDISK_PA:#x}..{LK_RAMDISK_PA + len(payload):#x} '
+                 f'overlaps kernel RAM {phys_base:#x}..{phys_base + mem_size:#x}')
     open(a.out, 'wb').write(make_boot_img(loader, dtb, payload))
     print(f"payload   {len(payload):#x} bytes at ramdisk {LK_RAMDISK_PA:#x}..{LK_RAMDISK_PA + len(payload):#x}")
     print(f"kernel RAM {phys_base:#x}..{phys_base + mem_size:#x}  virt_base {info['virt_base']}  entry {info['entry']}")

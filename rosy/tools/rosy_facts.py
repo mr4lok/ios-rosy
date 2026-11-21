@@ -32,8 +32,16 @@ _BOARD = dict(
     # VERIFIED on the live DTB (reserved-memory/splash_region@0x90001000, 0x13ff000):
     FB=0x90001000,                          # LK splash buffer left scanned out
     # VERIFIED on the live DTB (mdss_dsi_ft8613_ebbg_5p7_720p_video is the primary
-    # panel; touch focaltech,display-coords = <0 0 0x2d0 0x5a0> = 1440x720):
+    # panel; touch focaltech,display-coords = <0 0 0x2d0 0x5a0> = 720x1440):
+    # Panel buffer is packed 24 bpp (B,G,R) at the LK splash address; iOS renders
+    # into a 32 bpp logical surface and the kernel blits it down (see
+    # xnu/patches/0968). Panel is 720x1440 portrait (DTB 0x2d0 x 0x5a0).
     FB_W=720, FB_H=1440, FB_STRIDE=720 * 3,
+    # What IOMobileFramebuffer.framework reports as the canvas (== the logical
+    # iPhone X size, as on the vince port).
+    # Must stay >= 1000x2000: SweetSurface's vince-pool path (vinceplace=1) only
+    # takes screen-sized surfaces at least that big, and 1125x2436 is what the
+    # kernel publishes as its display mode.
     FB_CANVAS_W=1125, FB_CANVAS_H=2436,
     PANEL='ft8613_ebbg 5.7in 720p',
     # VERIFIED on the live DTB (focaltech@38, focaltech,fts, BLSP1 QUP3 / i2c-3):
@@ -45,8 +53,13 @@ _BOARD = dict(
     # rosy's LK loads its image/DTB/ramdisk at 0x40080000 / 0x43400000 /
     # 0x43600000 (seen on the loader console), so the kernel RAM must sit above
     # them and below the TZ/modem carve-outs at 0x84a00000 (DTB reserved-memory).
+    # The kernel carves a 192 MiB GPU pool at 0x73c00000-0x7fc00000 and shrinks
+    # the managed RAM by that much, so the RAM top must be 0x80000000 (the vince
+    # layout) for the managed region to end exactly at the pool.
+    # 0x45000000 - 0x80000000: what every boot that produced a kernel log used.
+    # 0x10000000 - 0x40000000 (tried once, rosy-boot14) wrote no log at all.
     PHYS_BASE=0x45000000,
-    MEM_SIZE=0x3fa00000,                    # 0x45000000 - 0x84a00000 (~1.0 GiB)
+    MEM_SIZE=0x3b000000,
 )
 
 _FACTS = {}

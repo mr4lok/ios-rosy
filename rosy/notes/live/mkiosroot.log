@@ -1,0 +1,47 @@
+Initialized upstream/ios16-root.img as a 20 GB HFS Plus volume with a 8192k journal
+copying /home/ace/.hermes/cache/scratch/tmp.6PbYJaO6a7/os/root
+copying SystemOS cryptex
+copying AppOS cryptex
+merging cryptexes into the root
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/loop0       20G   15G  5.3G  74% /home/ace/.hermes/cache/scratch/tmp.6PbYJaO6a7/root
+** upstream/ios16-root.img
+   Executing fsck_hfs (version 540.1-Linux).
+** Checking Journaled HFS Plus volume.
+** Detected a case-sensitive volume.
+   The volume name is iOSRoot
+** Checking extents overflow file.
+** Checking catalog file.
+** Checking multi-linked files.
+** Checking catalog hierarchy.
+** Checking extended attributes file.
+** Checking volume bitmap.
+** Checking volume information.
+** Repairing volume.
+** Rechecking volume.
+** Checking Journaled HFS Plus volume.
+** Detected a case-sensitive volume.
+   The volume name is iOSRoot
+** Checking extents overflow file.
+** Checking catalog file.
+** Checking multi-linked files.
+** Checking catalog hierarchy.
+** Checking extended attributes file.
+** Checking volume bitmap.
+** Checking volume information.
+** The volume iOSRoot was repaired successfully.
+** upstream/ios16-root.img (NO WRITE)
+   Executing fsck_hfs (version 540.1-Linux).
+** Checking Journaled HFS Plus volume.
+** Detected a case-sensitive volume.
+   The volume name is iOSRoot
+** Checking extents overflow file.
+** Checking catalog file.
+** Checking multi-linked files.
+** Checking catalog hierarchy.
+** Checking extended attributes file.
+** Checking volume bitmap.
+** Checking volume information.
+** The volume iOSRoot appears to be OK.
+wrote upstream/ios16-root.img
+EXIT=0

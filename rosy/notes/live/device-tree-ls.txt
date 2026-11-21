@@ -1,0 +1,10 @@
+ls: /proc/device-tree/name: Permission denied
+ls: /proc/device-tree/model: Permission denied
+ls: /proc/device-tree/compatible: Permission denied
+ls: /proc/device-tree/#address-cells: Permission denied
+ls: /proc/device-tree/qcom,msm-id: Permission denied
+ls: /proc/device-tree/qcom,board-id: Permission denied
+ls: /proc/device-tree/#size-cells: Permission denied
+ls: /proc/device-tree/interrupt-parent: Permission denied
+aliases cpus     memory qcom,battery-data soc 
+chosen  firmware psci   reserved-memory   

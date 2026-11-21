@@ -1,0 +1,61 @@
+I: Bus=0000 Vendor=0000 Product=0000 Version=0000
+N: Name="qpnp_pon"
+P: Phys=qpnp_pon/input0
+S: Sysfs=/devices/virtual/input/input0
+U: Uniq=
+H: Handlers=event0 keychord 
+B: PROP=40
+B: EV=3
+B: KEY=14000000000000 0
+
+I: Bus=0018 Vendor=0000 Product=0000 Version=0000
+N: Name="fts_ts"
+P: Phys=
+S: Sysfs=/devices/soc/78b7000.i2c/i2c-3/3-0038/input/input1
+U: Uniq=
+H: Handlers=mdss_fb kgsl event1 
+B: PROP=2
+B: EV=b
+B: KEY=400 0 0 8000 0 0
+B: ABS=661000000000000
+
+I: Bus=0000 Vendor=0000 Product=0000 Version=0000
+N: Name="uinput-goodix"
+P: Phys=
+S: Sysfs=/devices/virtual/input/input3
+U: Uniq=
+H: Handlers=event2 keychord 
+B: PROP=0
+B: EV=3
+B: KEY=200000000 0 3100000 40000800 1c16c000000000 0
+
+I: Bus=0019 Vendor=0001 Product=0001 Version=0100
+N: Name="gpio-keys"
+P: Phys=gpio-keys/input0
+S: Sysfs=/devices/soc/soc:gpio_keys/input/input4
+U: Uniq=
+H: Handlers=event3 keychord 
+B: PROP=0
+B: EV=3
+B: KEY=8000000000000 0
+
+I: Bus=0000 Vendor=0000 Product=0000 Version=0000
+N: Name="msm8953-snd-card-mtp Headset Jack"
+P: Phys=ALSA
+S: Sysfs=/devices/soc/c051000.sound/sound/card0/input5
+U: Uniq=
+H: Handlers=event4 
+B: PROP=0
+B: EV=21
+B: SW=3c0d4
+
+I: Bus=0000 Vendor=0000 Product=0000 Version=0000
+N: Name="msm8953-snd-card-mtp Button Jack"
+P: Phys=ALSA
+S: Sysfs=/devices/soc/c051000.sound/sound/card0/input6
+U: Uniq=
+H: Handlers=event5 
+B: PROP=40
+B: EV=3
+B: KEY=40 0 0 0 0 f0 c00000400000000 0 0 0
+

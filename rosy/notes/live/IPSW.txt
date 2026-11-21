@@ -1,0 +1,10 @@
+IPSW: iPhone10,3,iPhone10,6_16.7.16_20H392_Restore.ipsw
+path : /home/ace/Downloads/iPhone10,3,iPhone10,6_16.7.16_20H392_Restore.ipsw
+size : 6171035648 bytes (5.8 GiB)
+ProductVersion      : 16.7.16
+ProductBuildVersion : 20H392
+SupportedProductTypes: iPhone10,6, iPhone10,3
+7zz t : Everything is Ok (83 files, 7869793825 bytes uncompressed)
+DMGs: 087-86593-047.dmg (SystemOS), 087-86698-044.dmg (OS),
+      087-86715-047.dmg (AppOS), 087-86719-047.dmg, 087-86622-047.dmg
+kernelcache.release.iphone10b present

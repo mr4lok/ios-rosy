@@ -1,0 +1,3 @@
+List of devices attached
+68497977d250           device usb:1-1 product:rosy model:Redmi_5 device:rosy transport_id:3
+

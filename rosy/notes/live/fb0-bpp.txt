@@ -1,0 +1,1 @@
+cat: /sys/class/graphics/fb0/bits_per_pixel: Permission denied

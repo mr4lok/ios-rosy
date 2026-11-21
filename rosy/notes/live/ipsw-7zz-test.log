@@ -1,0 +1,22 @@
+
+7-Zip (z) 26.06 (x64) : Copyright (c) 1999-2026 Igor Pavlov : 2026-11-06
+ 64-bit locale=en_IN Threads:8 OPEN_MAX:4096, ASM
+
+Scanning the drive for archives:
+1 file, 6171035648 bytes (5886 MiB)
+
+Testing archive: /home/ace/Downloads/iPhone10,3,iPhone10,6_16.7.16_20H392_Restore.ipsw
+--
+Path = /home/ace/Downloads/iPhone10,3,iPhone10,6_16.7.16_20H392_Restore.ipsw
+Type = zip
+Physical Size = 6171035648
+64-bit = +
+Characteristics = Zip64
+
+Everything is Ok
+
+Folders: 8
+Files: 83
+Size:       7869793825
+Compressed: 6171035648
+EXIT=0
