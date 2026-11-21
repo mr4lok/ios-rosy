@@ -9,10 +9,21 @@ port (Redmi 5 Plus, same SoC family), which itself builds on
 [ios-topaz](https://github.com/MakrSas/ios-topaz) → [ios-sweet](https://github.com/dipa-studio/ios-sweet)
 → [HackiOS](https://github.com/oosexgang/hackios-xnu-kernel).
 
-> **Status, 2026-11-19:** the kernel boots on rosy — XNU comes up, the display
-> works, SMP runs (41 threads) and the eMMC driver reads the root device. The
-> iOS root filesystem is built and flashed into `userdata`; the first boot to
-> SpringBoard is in progress. This is a bring-up project, not a ROM.
+> **Status, 2026-11-21:** the iOS UI reaches the **lock screen** on the phone.
+> Console handover (patches 1001-1003), window-server surfaces
+> (`vinceplace=1 vincecache=1`), the unmodified iOS 16.7.16 userland, the
+> data-migration skip and the accountsd ownership fix (patch 1006) all work.
+> Recipe that gets there: kernel `xnu-kernel-rosy8` (= patches 1001-1006),
+> image `rosy-boot31.img`, boot-args with **`cpus=8`** - on one core launchd
+> starves and every extension dies on `extension check-in timeout`.
+> Still open: **no touch driver** (rosy has a FocalTech FT8006M, while the tree
+> only drives vince's Synaptics TD4310), so the screen cannot be swiped or
+> unlocked. This is a bring-up project, not a ROM.
+>
+> Current working status: [`rosy/notes/live/HANDOFF.md`](rosy/notes/live/HANDOFF.md)
+> (the old `rosy/notes/STATUS.txt` is stale). Off-laptop backup of the whole
+> working tree, including the milestone boot image as a release asset:
+> https://github.com/mr4lok/rosy-port
 
 ## Why rosy is close
 
@@ -51,7 +62,10 @@ rosy/tools/         the rosy port tooling:
                       mkiosroot-rosy.sh builds the iOS 16.7.16 HFS+ root from the IPSW
                       flash-and-boot.sh wipe userdata + flash + boot
                       dump-phone.sh     collect live device facts
-rosy/notes/         HW.md, RUNBOOK.md, STATUS.txt, DEVICE.txt
+                      rosy-root-tweaks.py  userland tweak set applied to the iOS root image
+                      rosy-fix-dirs.py  image-side repair helpers (--owner / --accounts)
+rosy/notes/         HW.md, RUNBOOK.md, STATUS.txt, DEVICE.txt, and
+                    live/HANDOFF.md + live/*.txt (device dumps, flash log)
 vince/, tools/, userland/   the upstream ios-vince port this derives from
 ```
 
