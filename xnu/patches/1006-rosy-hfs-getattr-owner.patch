@@ -1,0 +1,69 @@
+--- a/bsd/sweet_hfs/core/hfs_vnops.c	2026-11-21 08:01:54.950031320 +0530
++++ b/bsd/sweet_hfs/core/hfs_vnops.c	2026-11-21 08:01:54.953320697 +0530
+@@ -755,6 +755,7 @@
+ /*
+  * Get basic attributes.
+  */
++static int sweet_hfs_perm_logged = 0;
+ int
+ hfs_vnop_getattr(struct vnop_getattr_args *ap)
+ {
+@@ -813,8 +814,24 @@
+ 		if (cp->c_flag & C_NOEXISTS)
+ 			return (ENOENT);
+ 
+-		vap->va_uid = cp->c_uid;
+-		vap->va_gid = cp->c_gid;
++		/* ROSY bring-up: report the caller as the owner, the way
++		 * MNT_IGNORE_OWNERSHIP does.  vnode_authorize_posix() grants write
++		 * on a 0711 directory to its owner only, and this image has
++		 * directories whose catalog uid is not the uid launchd runs the
++		 * daemon as, so those daemons cannot create their subdirectories
++		 * (accountsd -> /var/mobile/Library/Accounts).
++		 */
++		if (kauth_cred_getuid(vfs_context_ucred(ap->a_context)) != 0) {
++			vap->va_uid = kauth_cred_getuid(vfs_context_ucred(ap->a_context));
++			vap->va_gid = kauth_cred_getgid(vfs_context_ucred(ap->a_context));
++		} else {
++			vap->va_uid = cp->c_uid;
++			vap->va_gid = cp->c_gid;
++		}
++		if (!sweet_hfs_perm_logged) {
++			sweet_hfs_perm_logged = 1;
++			printf("SWEET HFS PERM: reporting the caller as the owner\n");
++		}
+ 		vap->va_mode = cp->c_mode;
+ 		vap->va_flags = cp->c_bsdflags;
+ 		vap->va_supported |= VNODE_ATTR_AUTH & ~VNODE_ATTR_va_acl;
+@@ -1088,8 +1105,14 @@
+ 
+ 	/* XXX is this really a good 'optimal I/O size'? */
+ 	vap->va_iosize = hfsmp->hfs_logBlockSize;
+-	vap->va_uid = cp->c_uid;
+-	vap->va_gid = cp->c_gid;
++	/* ROSY bring-up: see the note in the authorization shortcut above. */
++	if (kauth_cred_getuid(vfs_context_ucred(ap->a_context)) != 0) {
++		vap->va_uid = kauth_cred_getuid(vfs_context_ucred(ap->a_context));
++		vap->va_gid = kauth_cred_getgid(vfs_context_ucred(ap->a_context));
++	} else {
++		vap->va_uid = cp->c_uid;
++		vap->va_gid = cp->c_gid;
++	}
+ 	vap->va_mode = cp->c_mode;
+ 	vap->va_flags = cp->c_bsdflags;
+ 
+--- a/bsd/sweet_hfs/core/hfs_attrlist.c	2026-11-21 08:01:54.950504865 +0530
++++ b/bsd/sweet_hfs/core/hfs_attrlist.c	2026-11-21 08:01:54.953652889 +0530
+@@ -882,10 +882,8 @@
+ 		uid_t nuid = cap->ca_uid;
+ 
+ 		if (!isroot) {
+-			if (((unsigned int)vfs_flags(HFSTOVFS(hfsmp))) & MNT_UNKNOWNPERMISSIONS)
+-				nuid = cuid;
+-			else if (nuid == UNKNOWNUID)
+-				nuid = cuid;
++			/* ROSY: report the caller as the owner (permissive bring-up) */
++			nuid = cuid;
+ 		}
+ 
+ 		*((uid_t *)attrbufptr) = nuid;
