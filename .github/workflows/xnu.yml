@@ -120,6 +120,33 @@ jobs:
           done
           [ -z "${missing:-}" ]
 
+      - name: Check that the rosy patches were applied
+        if: always()
+        run: |
+          # Same reason as above, for our own patches: dxb's `git apply --check` skips a
+          # patch that does not apply and the run still goes green, so verify the markers
+          # we expect in the built tree.  Patch 1008 was once silently dropped this way
+          # (the kernel kept 1125x2436 while the ADT said 2250 -> black screen).
+          for f in bsd/dev/rosy_touch.c bsd/dev/vince_input.c bsd/dev/vince_emmc.c; do
+            if [ -f "dxb/xnu/$f" ]; then echo "ok   $f"; else echo "MISSING $f"; missing=1; fi
+          done
+          if grep -q 'register address == buffer offset' dxb/xnu/bsd/dev/rosy_touch.c; then
+            echo "ok   rosy_touch.c carries the report-alignment fix"
+          else
+            echo "MISSING report-alignment fix in rosy_touch.c"; missing=1
+          fi
+          if grep -q 'SWEET_TOUCH_PANEL_W 720' dxb/xnu/iokit/Kernel/arm/hid/SweetHID.cpp; then
+            echo "ok   SweetHID.cpp carries the rosy 720x1440 touch geometry"
+          else
+            echo "MISSING rosy touch geometry in SweetHID.cpp"; missing=1
+          fi
+          if grep -q 'VINCE_FB_W              720' dxb/xnu/iokit/Kernel/arm/SweetFramebuffer.cpp; then
+            echo "ok   SweetFramebuffer.cpp carries the rosy 720x1440 panel"
+          else
+            echo "MISSING rosy panel size in SweetFramebuffer.cpp"; missing=1
+          fi
+          [ -z "${missing:-}" ]
+
       - name: Package build tree for local compiles
         if: always()
         run: |
