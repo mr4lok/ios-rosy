@@ -53,7 +53,15 @@ meson setup $BUILD mesa-$VERSION --cross-file cross.ini --wrap-mode=nofallback \
 	-Dosmesa=true -Dllvm=disabled -Dshared-glapi=enabled -Dgles1=disabled -Dgles2=enabled -Dopengl=true \
 	-Dzstd=disabled -Dxmlconfig=disabled -Dexpat=disabled -Dshader-cache=disabled -Dvalgrind=disabled \
 	-Dlibunwind=disabled -Dglvnd=disabled -Dvideo-codecs= -Dtools= -Dgallium-vdpau=disabled -Dgallium-va=disabled \
-	-Dgallium-xa=disabled -Dlmsensors=disabled -Dbuild-tests=false > meson-setup.log 2>&1 || { tail -60 meson-setup.log; exit 1; }
+	-Dgallium-xa=disabled -Dlmsensors=disabled -Dbuild-tests=false \
+	-Dc_args=-D_DARWIN_C_SOURCE -Dcpp_args=-D_DARWIN_C_SOURCE > meson-setup.log 2>&1 || { tail -60 meson-setup.log; exit 1; }
+echo "== Darwin feature-test macro: $(grep -o '\-D_DARWIN_C_SOURCE' $BUILD/compile_commands.json 2>/dev/null | head -1) =="
+# The format enum (and the PIPE_FORMAT_RG88_UNORM alias) lives in a header that
+# meson generates into the build tree.  If it is not on the include path, every TU
+# that touches an aliased format fails with "use of undeclared identifier".
+echo "== generated format header =="
+ls -l $BUILD/src/util/format/u_format_gen.h 2>&1 | tail -1
+grep -c "PIPE_FORMAT_RG88_UNORM" $BUILD/src/util/format/u_format_gen.h 2>&1 || true
 ninja -C $BUILD > ninja.log 2>&1 || { tail -80 ninja.log; exit 1; }
 $(xcrun -f strip) -x -o out/libOSMesa.8.dylib $BUILD/src/gallium/targets/osmesa/libOSMesa.8.dylib
 install_name_tool -id /topaz/lib/libOSMesa.8.dylib out/libOSMesa.8.dylib
