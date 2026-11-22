@@ -17,6 +17,12 @@ if [ ! -d mesa-$VERSION ]; then
 	echo "$SHA256  mesa-$VERSION.tar.xz" | shasum -a 256 -c --quiet
 	tar xJf mesa-$VERSION.tar.xz
 	for p in "$HERE"/*.patch; do patch -s --no-backup-if-mismatch -d mesa-$VERSION -p1 < "$p"; done
+	# Darwin has an <endian.h> too (meson's cc.has_header() finds it), but it does not
+	# define the glibc __BYTE_ORDER macros -- the Darwin ones are in <machine/endian.h>.
+	# Without this the glibc branch is taken and both UTIL_ARCH_*_ENDIAN end up unset.
+	sed -i '' 's/^#ifdef HAVE_ENDIAN_H$/#if defined(HAVE_ENDIAN_H) \&\& !defined(__APPLE__)/' \
+		mesa-$VERSION/src/util/u_endian.h
+	grep -q 'defined(HAVE_ENDIAN_H) && !defined(__APPLE__)' mesa-$VERSION/src/util/u_endian.h
 fi
 rm -rf mesa-$VERSION/src/redwood-drm
 cp -r "$HERE/redwood-drm" mesa-$VERSION/src/redwood-drm
