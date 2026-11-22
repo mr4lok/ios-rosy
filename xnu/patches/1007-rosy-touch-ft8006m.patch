@@ -1,0 +1,643 @@
+From: rosy-port <ace@localhost>
+Date: Sat, 22 Nov 2026 00:00:00 +0000
+Subject: [PATCH] 1007 rosy: FocalTech FT8006M touch screen on QUP3
+
+rosy has a FocalTech FT8006M at 0x38 on BLSP1 QUP3 (i2c-3), reset GPIO64,
+attn GPIO65 -- from the stock device tree.  vince_input.c already carries a
+proven QUP3 FIFO I2C transport for this same SoC and the same QUP3 block;
+rosy_touch.c reuses it and adds the vendor FT8006M register layout and the
+report parser from research/ft8006 (the Xiaomi/LineageOS fts_ts driver).
+
+The report is one flat buffer in which the register address equals the byte
+offset, so the coordinate bytes of record 0 are read from register 3 (the
+vendor driver's divided path reads them from 0x09 only because it already
+read 9 bytes).  Reading them from register 4, or not at all for a single
+finger, shifts every record by one byte and yields coordinates above the
+panel size.
+
+Polled on one kernel thread, no IRQ and no PMIC writes.  If the IC does not
+answer, its supply is the likely cause (DTB: vdd = PMI8940 IBB 0xdc00,
+lab = 0xde00) and the log says so rather than writing PMIC registers blind.
+The first five contact frames are always dumped, and every 200 frames the
+largest raw coordinates seen are printed, so one boot shows whether the IC
+reports panel pixels (0..719 / 0..1439) or a 12-bit full scale.
+
+Also fixes the ROSY touch geometry in SweetHID.cpp: the panel is 720x1440
+portrait (VINCE_FB_W/H), not the transposed 1440x720, and drops the
+SWEET_TOUCH_PANEL_W redefinition warning.
+
+Boot-args: rosytouch=0 off, rosytouchdelay=N, rosytouchdump=1.
+
+---
+ bsd/conf/files                    |   1 +
+ bsd/dev/rosy_touch.c              | 548 ++++++++++++++++++++++++++++++++++++++
+ bsd/dev/vince_emmc.c              |   4 ++
+ iokit/Kernel/arm/hid/SweetHID.cpp |  12 +-
+ 4 files changed, 602 insertions(+), 2 deletions(-)
+ create mode 100644 bsd/dev/rosy_touch.c
+
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -110,6 +110,7 @@
+ bsd/dev/vince_input.c			standard
+ bsd/dev/vince_pmic.c			standard
+ bsd/dev/vince_adreno.c			standard
++bsd/dev/rosy_touch.c			standard
+ bsd/dev/redwood_sta.c		standard
+ bsd/dev/redwood_net.c		standard
+ bsd/dev/redwood_apple80211.c	standard
+
+--- a/bsd/dev/rosy_touch.c
++++ b/bsd/dev/rosy_touch.c
+@@ -0,0 +1,548 @@
++/*
++ * ROSY (Xiaomi Redmi 5, MSM8953 / Snapdragon 450) touch screen:
++ * FocalTech FT8006M on BLSP1 QUP3 (i2c-3, address 0x38).
++ *
++ * The I2C transport (TLMM pins, GCC QUP3 root clock, QUP FIFO mode with v1
++ * tags) is the proven bsd/dev/vince_input.c code for the same SoC and the same
++ * QUP3 block at 0x78b7000; the register layout and the report parser are the
++ * vendor FT8006M driver's (research/ft8006, the Xiaomi/LineageOS fts_ts
++ * driver). Both are known-good references; nothing here is guessed.
++ *
++ * Facts from the stock device tree (upstream/rosy-stock.dtb):
++ *   /soc/i2c@78b7000/focaltech@38   reg 0x38, focaltech,family-id 0x54
++ *   focaltech,reset-gpio = GPIO64, focaltech,irq-gpio = GPIO65 (TLMM 0x1000000)
++ *   focaltech,display-coords = <0 0 0x2d0 0x5a0>   (720x1440 panel pixels)
++ *   pinctrl i2c_3: GPIO10 = SDA, GPIO11 = SCL, function blsp_i2c3
++ *   clocks: qcom,gcc@1800000 (the QUP3 apps RCG page is 0x1804000, as on vince)
++ *
++ * Everything runs polled on one kernel thread: no IRQ registration, and in this
++ * first version no PMIC writes at all. If the IC does not answer on the bus,
++ * its supply is the likely cause (DTB: vdd = PMI8940 IBB 0xdc00, lab = 0xde00,
++ * panel_iovdd = 0xe8 -- all software-controlled regulators, off after LK), and
++ * the log says so instead of writing PMIC registers blind.
++ *
++ * Boot-args: rosytouch=0 turns it off, rosytouchdelay=N waits N seconds before
++ *            the bring-up (so a hung bus cannot take the GUI/log with it),
++ *            rosytouchdump=1 prints every raw report.
++ */
++#if defined(ROSY)
++#include <sys/param.h>
++#include <sys/systm.h>
++#include <kern/clock.h>
++#include <kern/thread.h>
++#include <kern/sched_prim.h>
++#include <machine/machine_routines.h>
++#include <pexpert/pexpert.h>
++#include <libkern/libkern.h>
++
++extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
++extern kern_return_t thread_terminate(thread_t);
++extern void sweet_hid_touch(int finger, int down, int x, int y);
++void rosy_touch_start(void);
++
++#define TLMM_PA         0x01000000u
++#define TLMM_SIZE       0x300000u
++#define GPIO_CTL(n)     ((uint32_t)(n) * 0x1000u)
++#define GPIO_IO(n)      (GPIO_CTL(n) + 4u)
++#define GPIO_SDA        10
++#define GPIO_SCL        11
++#define GPIO_RST        64
++#define GPIO_ATTN       65
++
++#define GCC_QUP3_PA     0x01804000u     /* blsp1_qup3_i2c_apps: RCG CMD +0, CFG +4, CBCR +0x20 */
++#define QUP3_PA         0x078b7000u
++
++#define QUP_CONFIG      0x000u
++#define QUP_STATE       0x004u
++#define QUP_IO_MODE     0x008u
++#define QUP_SW_RESET    0x00cu
++#define QUP_OPERATIONAL 0x018u
++#define QUP_ERROR_FLAGS 0x01cu
++#define QUP_HW_VERSION  0x030u
++#define QUP_MX_OUT_CNT  0x100u
++#define QUP_OUT_FIFO    0x110u
++#define QUP_MX_WR_CNT   0x150u
++#define QUP_MX_IN_CNT   0x200u
++#define QUP_MX_RD_CNT   0x208u
++#define QUP_IN_FIFO     0x218u
++#define QUP_CLK_CTL     0x400u
++#define QUP_I2C_STATUS  0x404u
++
++#define ST_RESET        0u
++#define ST_RUN          1u
++#define ST_PAUSE        3u
++#define ST_MASK         3u
++#define ST_VALID        (1u << 2)
++#define ST_MAST_GEN     (1u << 4)
++#define OP_OUT_NOT_EMPTY (1u << 4)
++#define OP_IN_NOT_EMPTY (1u << 5)
++#define OP_OUT_SVC      (1u << 8)
++#define OP_IN_SVC       (1u << 9)
++#define OP_MX_OUT_DONE  (1u << 10)
++#define CFG_NO_INPUT    (1u << 7)
++#define CFG_I2C         ((2u << 8) | 15u)       /* I2C mini core, 16-bit entries */
++#define IO_REPACK       0xc000u
++#define I2C_ERR_MASK    0x38000fcu
++#define I2C_NACK        (1u << 3)
++#define I2C_BUS_ACTIVE  (1u << 8)
++#define QUP_ERR_MASK    0x7cu
++#define TAG_START       0x100u
++#define TAG_DATA        0x200u
++#define TAG_STOP        0x300u
++#define TAG_REC         0x400u
++#define CLK_CTL_400K    0xe031cu                /* 19.2 MHz XO, Linux's fast-mode divider */
++#define CLK_CTL_100K    0x35du                  /* what the vince shim proved */
++
++#define FTS_ADDR        0x38
++#define FTS_MAX_FINGERS 10
++#define FTS_POINT_LEN   6
++#define FTS_HEAD_LEN    3
++#define FTS_READ_LEN    (FTS_HEAD_LEN + FTS_POINT_LEN * FTS_MAX_FINGERS)  /* 63 */
++#define FTS_FIFO_MAX    32                      /* QUP v1 input FIFO depth */
++
++/* vendor FT8006M registers (research/ft8006/focaltech_common.h) */
++#define FTS_REG_WORKMODE 0x00
++#define FTS_REG_CHIP_ID  0xA3
++#define FTS_REG_FW_VER   0xA6
++#define FTS_REG_POWER    0xA5
++#define FTS_REG_VENDOR   0xA8
++#define FTS_REG_CHIP_ID2 0x9F
++
++#define TOUCH_POLL_MS   8
++
++static vm_offset_t tlmm, gcc, qup;
++static uint32_t qup_in_fifo, qup_out_fifo, qup_clk_ctl = CLK_CTL_400K;
++static int touch_chan;
++static bool touch_started;
++/* Largest raw coordinates seen: tells us whether the IC reports panel pixels
++ * (0..719 / 0..1439) or a 12-bit full scale (0..4095) and so needs scaling. */
++static uint16_t s_maxx, s_maxy;
++static unsigned s_dumped;
++
++static uint32_t
++in_rd(vm_offset_t base, uint32_t off)
++{
++	uint32_t v = *(volatile uint32_t *)(base + off);
++	__asm__ volatile("dmb oshld" ::: "memory");
++	return v;
++}
++
++static void
++in_wr(vm_offset_t base, uint32_t off, uint32_t val)
++{
++	__asm__ volatile("dmb oshst" ::: "memory");
++	*(volatile uint32_t *)(base + off) = val;
++	__asm__ volatile("dsb osh" ::: "memory");
++}
++
++static void
++in_sleep(int *chan, unsigned ms)
++{
++	uint64_t deadline;
++	clock_interval_to_deadline(ms, NSEC_PER_MSEC, &deadline);
++	(void)assert_wait_deadline(chan, THREAD_UNINT, deadline);
++	thread_block(THREAD_CONTINUE_NULL);
++}
++
++/* ---- QUP3 I2C (vince_input.c, unchanged) ---- */
++
++static int
++qup_poll(uint32_t want, uint32_t mask)
++{
++	for (int i = 0; i < 1000; i++) {
++		uint32_t s = in_rd(qup, QUP_STATE);
++		if ((s & ST_VALID) && (s & mask) == want) {
++			return 0;
++		}
++		delay(1);
++	}
++	return -1;
++}
++
++static int
++qup_set_state(uint32_t st)
++{
++	if (qup_poll(0, 0)) {
++		return -1;
++	}
++	in_wr(qup, QUP_STATE, st);
++	return qup_poll(st, ST_MASK);
++}
++
++/* -2 NACK, -3 other bus/QUP error (cleared, QUP left in reset) */
++static int
++qup_check_err(void)
++{
++	uint32_t be = in_rd(qup, QUP_I2C_STATUS) & I2C_ERR_MASK;
++	uint32_t qe = in_rd(qup, QUP_ERROR_FLAGS) & QUP_ERR_MASK;
++	if (!be && !qe) {
++		return 0;
++	}
++	if (qe) {
++		in_wr(qup, QUP_ERROR_FLAGS, qe);
++	}
++	if (be) {
++		in_wr(qup, QUP_I2C_STATUS, be);
++	}
++	in_wr(qup, QUP_STATE, ST_RESET);
++	return (be & I2C_NACK) ? -2 : -3;
++}
++
++/* One START..STOP message: write n bytes of tx, or read n bytes into rx. -4 timeout, -5 too long. */
++static int
++qup_msg(int rd, const uint8_t *tx, uint8_t *rx, uint32_t n)
++{
++	uint32_t addr8 = (FTS_ADDR << 1) | (rd ? 1u : 0u);
++	uint32_t ntx = rd ? 2 : n + 1;
++	uint32_t cfg = CFG_I2C, got = 0;
++	int r;
++
++	if (!n || (rd ? n > qup_in_fifo : ntx > qup_out_fifo)) {
++		return -5;
++	}
++	in_wr(qup, QUP_SW_RESET, 1);
++	if (qup_poll(ST_RESET, ST_MASK)) {
++		return -1;
++	}
++	in_wr(qup, QUP_CONFIG, CFG_I2C);
++	if (qup_poll(ST_MAST_GEN, ST_MAST_GEN)) {
++		return -1;
++	}
++	in_wr(qup, QUP_MX_OUT_CNT, 0);
++	in_wr(qup, QUP_MX_WR_CNT, ntx);
++	if (rd) {
++		in_wr(qup, QUP_MX_IN_CNT, 0);
++		in_wr(qup, QUP_MX_RD_CNT, n);
++	} else {
++		cfg |= CFG_NO_INPUT;
++	}
++	in_wr(qup, QUP_CONFIG, cfg);
++	in_wr(qup, QUP_IO_MODE, IO_REPACK);
++	if (qup_set_state(ST_RUN)) {
++		return -1;
++	}
++	in_wr(qup, QUP_CLK_CTL, qup_clk_ctl);
++	if (qup_set_state(ST_PAUSE)) {
++		return -1;
++	}
++	if (rd) {
++		in_wr(qup, QUP_OUT_FIFO, ((TAG_REC | (n & 0xffu)) << 16) | TAG_START | addr8);
++	} else {
++		/* two 16-bit entries per word: (START, byte 0), (byte 1, byte 2), ...; STOP on the last byte */
++		uint32_t val = TAG_START | addr8;
++		for (uint32_t i = 0; i < n; i++) {
++			uint32_t e = (i == n - 1 ? TAG_STOP : TAG_DATA) | tx[i];
++			if (i & 1) {
++				val = e;
++				if (i == n - 1) {
++					in_wr(qup, QUP_OUT_FIFO, val);
++				}
++			} else {
++				in_wr(qup, QUP_OUT_FIFO, val | e << 16);
++			}
++		}
++	}
++	if (qup_set_state(ST_RUN)) {
++		return -1;
++	}
++	for (int t = 0;; t++) {
++		if ((r = qup_check_err())) {
++			return r;
++		}
++		uint32_t op = in_rd(qup, QUP_OPERATIONAL);
++		if (rd) {
++			while (got < n && (in_rd(qup, QUP_OPERATIONAL) & OP_IN_NOT_EMPTY)) {
++				uint32_t v = in_rd(qup, QUP_IN_FIFO);
++				rx[got++] = (uint8_t)v;
++				if (got < n) {
++					rx[got++] = (uint8_t)(v >> 16);
++				}
++			}
++			if (got == n) {
++				break;
++			}
++		} else if (!(op & OP_OUT_NOT_EMPTY) && (op & (OP_MX_OUT_DONE | OP_OUT_SVC))) {
++			break;
++		}
++		if (t >= 20000) {
++			in_wr(qup, QUP_SW_RESET, 1);
++			return -4;
++		}
++		delay(5);
++	}
++	for (int t = 0; in_rd(qup, QUP_I2C_STATUS) & I2C_BUS_ACTIVE; t++) {
++		if (t >= 5000) {
++			return -4;
++		}
++		delay(2);
++	}
++	r = qup_check_err();    /* a NACK on the last byte shows once the bus is idle */
++	in_wr(qup, QUP_OPERATIONAL, OP_OUT_SVC | OP_IN_SVC);
++	if (qup_set_state(ST_RESET) && !r) {
++		r = -1;
++	}
++	return r;
++}
++
++/*
++ * Write the register address, then read n bytes. The QUP input FIFO is only
++ * FTS_FIFO_MAX deep, so a report is read in chunks; each chunk repeats the
++ * register address (the FT8006M is a plain 8-bit register part, no paging).
++ */
++static int
++fts_read(uint16_t reg, uint8_t *buf, uint32_t n)
++{
++	while (n) {
++		uint32_t chunk = n > FTS_FIFO_MAX ? FTS_FIFO_MAX : n;
++		uint8_t a = (uint8_t)reg;
++		int r = qup_msg(0, &a, NULL, 1);
++		if (!r) {
++			r = qup_msg(1, NULL, buf, chunk);
++		}
++		if (r) {
++			return r;
++		}
++		reg += (uint16_t)chunk;
++		buf += chunk;
++		n -= chunk;
++	}
++	return 0;
++}
++
++/* ---- TLMM / clocks / reset (vince_input.c, unchanged) ---- */
++
++static void
++tlmm_cfg(unsigned pin, unsigned func, unsigned pull, unsigned drive, bool out, bool high)
++{
++	if (out) {
++		/* latch first, then the output enable (reset is active low) */
++		in_wr(tlmm, GPIO_IO(pin), (in_rd(tlmm, GPIO_IO(pin)) & ~2u) | (high ? 2u : 0u));
++	}
++	uint32_t cfg = in_rd(tlmm, GPIO_CTL(pin)) & ~0x3ffu;
++	in_wr(tlmm, GPIO_CTL(pin), cfg | (func << 2) | pull | (drive << 6) | (out ? 0x200u : 0u));
++}
++
++static bool
++touch_hw_init(void)
++{
++	static const uint8_t blk[4] = {4, 16, 32, 0};
++
++	tlmm_cfg(GPIO_SDA, 2, 0, 0, false, false);      /* blsp_i2c3, no pull (board pull-ups), 2 mA */
++	tlmm_cfg(GPIO_SCL, 2, 0, 0, false, false);
++	tlmm_cfg(GPIO_ATTN, 0, 3, 0, false, false);     /* input, pull-up */
++	tlmm_cfg(GPIO_RST, 0, 3, 3, true, true);        /* out of reset */
++	in_sleep(&touch_chan, 200);
++
++	if (in_rd(gcc, 0x20) & 0x80000000u) {
++		in_wr(gcc, 0x04, 0);                    /* source XO, divider bypass */
++		in_wr(gcc, 0x00, in_rd(gcc, 0x00) | 1u);
++		for (int i = 0; i < 1000 && (in_rd(gcc, 0x00) & 1u); i++) {
++			delay(1);
++		}
++		in_wr(gcc, 0x20, in_rd(gcc, 0x20) | 1u);
++		for (int i = 0; i < 1000 && (in_rd(gcc, 0x20) & 0x80000000u); i++) {
++			delay(1);
++		}
++		if (in_rd(gcc, 0x20) & 0x80000000u) {
++			printf("ROSY TOUCH: QUP3 clock did not start (cmd %#x cbcr %#x)\n",
++			    in_rd(gcc, 0x00), in_rd(gcc, 0x20));
++			return false;
++		}
++	}
++	in_wr(qup, QUP_SW_RESET, 1);
++	if (qup_poll(ST_RESET, ST_MASK)) {
++		printf("ROSY TOUCH: QUP3 reset timeout (state %#x)\n", in_rd(qup, QUP_STATE));
++		return false;
++	}
++	uint32_t io = in_rd(qup, QUP_IO_MODE);
++	uint32_t ob = blk[io & 3u], ib = blk[(io >> 5) & 3u];
++	if (!ob || !ib) {
++		printf("ROSY TOUCH: QUP3 io mode %#x unsupported\n", io);
++		return false;
++	}
++	qup_out_fifo = ob / 2 * (2u << ((io >> 2) & 7u));
++	qup_in_fifo = ib / 2 * (2u << ((io >> 7) & 7u));
++	if (qup_in_fifo > FTS_FIFO_MAX) {
++		qup_in_fifo = FTS_FIFO_MAX;
++	}
++	printf("ROSY TOUCH: QUP3 hw %#x io %#x fifo in %u out %u\n",
++	    in_rd(qup, QUP_HW_VERSION), io, qup_in_fifo, qup_out_fifo);
++	return true;
++}
++
++/* ---- reports ---- */
++
++static void
++touch_release_all(uint32_t *active)
++{
++	for (unsigned i = 0; i < FTS_MAX_FINGERS; i++) {
++		if (*active & (1u << i)) {
++			sweet_hid_touch((int)i, 0, 0, 0);
++		}
++	}
++	*active = 0;
++}
++
++static void
++touch_report(uint8_t *buf, uint32_t *active, bool dump)
++{
++	unsigned n = buf[2] & 15u;
++	uint32_t mask = 0;
++	int x[FTS_MAX_FINGERS] = {0}, y[FTS_MAX_FINGERS] = {0};
++
++	if (n > FTS_MAX_FINGERS) {
++		touch_release_all(active);
++		return;
++	}
++	for (unsigned i = 0; i < n; i++) {
++		const uint8_t *p = buf + FTS_HEAD_LEN + FTS_POINT_LEN * i;
++		unsigned id = p[2] >> 4;                /* FTS_TOUCH_ID_POS */
++		unsigned ev = p[0] >> 6;                /* FTS_TOUCH_EVENT_POS */
++		if (id >= FTS_MAX_FINGERS) {
++			break;                          /* vendor's unused-record sentinel */
++		}
++		if (mask & (1u << id)) {
++			continue;                       /* duplicate slot */
++		}
++		mask |= 1u << id;
++		if (ev == 1u || ev == 3u) {
++			mask &= ~(1u << id);            /* UP / "no event" */
++			continue;
++		}
++		x[id] = ((unsigned)(p[0] & 15u) << 8) | p[1];
++		y[id] = ((unsigned)(p[2] & 15u) << 8) | p[3];
++		if (x[id] > s_maxx) {
++			s_maxx = (uint16_t)x[id];
++		}
++		if (y[id] > s_maxy) {
++			s_maxy = (uint16_t)y[id];
++		}
++	}
++	if (dump || (mask != 0 && s_dumped < 5)) {
++		if (mask != 0) {
++			s_dumped++;
++		}
++		printf("ROSY TOUCH: n=%u raw %02x %02x %02x | %02x %02x %02x %02x %02x %02x | %02x %02x %02x %02x %02x %02x\n",
++		    n, buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7], buf[8],
++		    buf[9], buf[10], buf[11], buf[12], buf[13], buf[14]);
++	}
++	for (unsigned i = 0; i < FTS_MAX_FINGERS; i++) {
++		uint32_t bit = 1u << i;
++		if ((mask & bit) && !(*active & bit)) {
++			sweet_hid_touch((int)i, 1, x[i], y[i]);
++		} else if ((mask & bit) && (*active & bit)) {
++			sweet_hid_touch((int)i, 1, x[i], y[i]);     /* move */
++		} else if (!(mask & bit) && (*active & bit)) {
++			sweet_hid_touch((int)i, 0, 0, 0);
++		}
++	}
++	*active = mask;
++}
++
++static void
++touch_thread(void *arg, wait_result_t result)
++{
++	uint8_t buf[FTS_READ_LEN];
++	uint32_t active = 0;
++	unsigned errors = 0, idle = 0, frames = 0, dump = 0;
++	int delay_s = 0;
++	(void)arg;
++	(void)result;
++
++	(void)PE_parse_boot_argn("rosytouchdelay", &delay_s, sizeof(delay_s));
++	(void)PE_parse_boot_argn("rosytouchdump", &dump, sizeof(dump));
++	if (delay_s > 0) {
++		in_sleep(&touch_chan, (unsigned)delay_s * 1000u);
++	}
++	if (!touch_hw_init()) {
++		goto out;
++	}
++	/* The bus ACK alone proves the IC is powered; the id is only informative. */
++	{
++		uint8_t id = 0, id2 = 0, fw = 0, vendor = 0, pmode = 0;
++		int r = fts_read(FTS_REG_CHIP_ID, &id, 1);
++		int r2 = fts_read(FTS_REG_CHIP_ID2, &id2, 1);
++		int r3 = fts_read(FTS_REG_FW_VER, &fw, 1);
++		int r4 = fts_read(FTS_REG_VENDOR, &vendor, 1);
++		int r5 = fts_read(FTS_REG_POWER, &pmode, 1);
++		printf("ROSY TOUCH: probe id %#x/%d id2 %#x/%d fw %#x/%d vendor %#x/%d pmode %#x/%d\n",
++		    id, r, id2, r2, fw, r3, vendor, r4, pmode, r5);
++		if (r) {
++			printf("ROSY TOUCH: no answer at 0x%x -- IC not powered (vdd/lab/ibb are PMIC regulators)\n",
++			    FTS_ADDR);
++			goto out;
++		}
++	}
++	printf("ROSY TOUCH: polling (panel coords 720x1440)\n");
++
++	for (;;) {
++		/* the attention line (low) says a report is waiting; check anyway every ~100 ms */
++		if ((in_rd(tlmm, GPIO_IO(GPIO_ATTN)) & 1u) && ++idle < 12) {
++			in_sleep(&touch_chan, TOUCH_POLL_MS);
++			continue;
++		}
++		idle = 0;
++		/* the report is one flat buffer: register address == buffer offset.
++		 * The vendor driver reads 3 bytes, then (for n>1) the rest from
++		 * register 0x09; for a single finger record 0 still needs its 6
++		 * coordinate bytes from register 3. */
++		int r = fts_read(FTS_REG_WORKMODE, buf, FTS_HEAD_LEN);
++		if (!r) {
++			unsigned n = buf[2] & 15u;
++			if (n >= 1 && n <= FTS_MAX_FINGERS) {
++				r = fts_read(FTS_HEAD_LEN, buf + FTS_HEAD_LEN, n * FTS_POINT_LEN);
++			}
++		}
++		if (r) {
++			if ((errors++ % 100u) == 0) {
++				printf("ROSY TOUCH: read error %d (i2c %#x qup %#x)\n", r,
++				    in_rd(qup, QUP_I2C_STATUS), in_rd(qup, QUP_ERROR_FLAGS));
++			}
++			if (errors == 5) {
++				touch_release_all(&active);
++			}
++		} else {
++			errors = 0;
++			touch_report(buf, &active, dump != 0 || frames < 5);
++			if ((++frames % 200u) == 0) {
++				printf("ROSY TOUCH: %u frames, %u contacts, raw max x %u y %u\n",
++				    frames, __builtin_popcount((unsigned)active), s_maxx, s_maxy);
++			}
++		}
++		in_sleep(&touch_chan, TOUCH_POLL_MS);
++	}
++out:
++	(void)thread_terminate(current_thread());
++	thread_block(THREAD_CONTINUE_NULL);
++}
++
++void
++rosy_touch_start(void)
++{
++	int on = 1;
++	thread_t thread;
++
++	if (touch_started) {
++		return;
++	}
++	touch_started = true;
++	(void)PE_parse_boot_argn("rosytouch", &on, sizeof(on));
++	if (!on) {
++		printf("ROSY TOUCH: off (rosytouch=0)\n");
++		return;
++	}
++	tlmm = ml_io_map(TLMM_PA, TLMM_SIZE);
++	gcc = ml_io_map(GCC_QUP3_PA, 0x1000);
++	qup = ml_io_map(QUP3_PA, 0x1000);
++	if (!tlmm || !gcc || !qup) {
++		printf("ROSY TOUCH: MMIO mapping failed (tlmm %#lx gcc %#lx qup %#lx)\n",
++		    (unsigned long)tlmm, (unsigned long)gcc, (unsigned long)qup);
++		return;
++	}
++	if (kernel_thread_start(touch_thread, NULL, &thread) == KERN_SUCCESS) {
++		thread_deallocate(thread);
++	} else {
++		printf("ROSY TOUCH: thread not started\n");
++	}
++}
++#endif /* ROSY */
+
+--- a/bsd/dev/vince_emmc.c
++++ b/bsd/dev/vince_emmc.c
+@@ -730,6 +730,7 @@
+ extern uint64_t sweet_log_position(void);
+ extern void sweet_sample_start(void);                                       /* bsd/dev/sweet_sample.c */
+ extern void vince_input_start(void);                                        /* bsd/dev/vince_input.c */
++extern void rosy_touch_start(void);                                         /* bsd/dev/rosy_touch.c */
+ 
+ #define VL_RING         (4u << 20)
+ #define VL_HDR_SECT     8u                                  /* one 4 KiB block for the header */
+@@ -1038,6 +1039,9 @@
+ 	/* the process sampler (patch 0054) is started by the UFS driver on sweet; here by the eMMC one */
+ 	sweet_sample_start();
+ 	vince_input_start();    /* keys and touch (patch 0976); vincekeys=0 / vincetouch=0 turn them off */
++#if defined(ROSY)
++	rosy_touch_start();     /* FocalTech FT8006M on QUP3 (patch 1007); rosytouch=0 turns it off */
++#endif
+ 	return 0;
+ }
+ 
+
+--- a/iokit/Kernel/arm/hid/SweetHID.cpp
++++ b/iokit/Kernel/arm/hid/SweetHID.cpp
+@@ -356,13 +356,15 @@
+  * app-switcher gesture.
+  */
+ #define SWEET_TOUCH_EDGE_PX 48
+-#define SWEET_TOUCH_PANEL_W 1080
+ #if defined(ROSY)
+-#define SWEET_TOUCH_PANEL_W 1440
+-#define SWEET_TOUCH_PANEL_H 720         /* rosy panel (SweetFramebuffer.cpp VINCE_FB_H) */
++/* rosy: 720x1440 panel pixels (SweetFramebuffer.cpp VINCE_FB_W/H), portrait */
++#define SWEET_TOUCH_PANEL_W 720
++#define SWEET_TOUCH_PANEL_H 1440
+ #elif defined(VINCE)
++#define SWEET_TOUCH_PANEL_W 1080
+ #define SWEET_TOUCH_PANEL_H 2160        /* vince panel (SweetFramebuffer.cpp VINCE_FB_H) */
+ #else
++#define SWEET_TOUCH_PANEL_W 1080
+ #define SWEET_TOUCH_PANEL_H 2400
+ #endif
+ class SweetHIDTouch : public IOHIDEventService {
