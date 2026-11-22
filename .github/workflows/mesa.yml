@@ -1,8 +1,18 @@
 name: mesa
 # Mesa 25.0.7 (freedreno + OSMesa) for the iOS 16 userland and the gputest program, built with Xcode's clang.
-# Run by hand (Actions -> mesa -> Run workflow). The result is the artifact "mesa-ios".
+# The result is the artifact "mesa-ios".
+#
+# GitHub only registers a workflow in a repository once it has run there, and a
+# `workflow_dispatch`-only file that has never run is invisible to both the API and
+# the dispatch endpoint (404).  So this also triggers on pushes that touch the Mesa
+# sources, which registers it; keep the paths filter narrow.
 on:
   workflow_dispatch:
+  push:
+    branches: [rosy]
+    paths:
+      - '.github/workflows/mesa.yml'
+      - 'userland/mesa/**'
 
 jobs:
   build:
