@@ -1,0 +1,35 @@
+From: rosy-port <ace@localhost>
+Date: Sat, 22 Nov 2026 00:00:00 +0000
+Subject: [PATCH] 1008 rosy: present 1125x2250 so the panel aspect is exact
+
+UIKit renders the iPhone X canvas 1125x2436 (19.5:9, aspect 0.462) and the
+kernel scaled it into rosy's 720x1440 panel (18:9, 0.500), which squeezed
+everything ~8% vertically -- visible as a compressed lock screen.  Presenting
+1125x2250 (375x750 points @3x) keeps the point width and @3x and makes the
+copy uniform.  The ADT canvas-height in tools/rosy_facts.py is changed to
+match.
+
+---
+ iokit/Kernel/arm/SweetFramebuffer.cpp | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -145,7 +145,17 @@
+  * Boot-arg sweetfb_native=1 presents the real panel size instead.
+  */
+ #define SWEET_FB_LOGICAL_W              1125
++#if defined(ROSY)
++/*
++ * rosy's panel is 720x1440 = 18:9 (aspect 0.500), while the iPhone X canvas is
++ * 1125x2436 = 19.5:9 (0.462).  Scaling the latter into the former squeezes
++ * everything ~8% vertically.  1125x2250 keeps @3x (375x750 points) and matches
++ * the panel aspect exactly, so the copy is uniform.
++ */
++#define SWEET_FB_LOGICAL_H              2250
++#else
+ #define SWEET_FB_LOGICAL_H              2436
++#endif
+ #define SWEET_FB_FORMAT_BGRA            0x42475241
+ 
+ /* defined below with the swap helpers; vinceZeroPresent() needs it earlier */
