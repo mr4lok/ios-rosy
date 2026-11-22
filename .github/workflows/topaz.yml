@@ -1,8 +1,16 @@
 name: topaz
 # libtopaz-gl.dylib, libtopaz-inject.dylib and the backboardd wrapper (GPU rendering for the window server).
-# Run by hand (Actions -> topaz -> Run workflow). The result is the artifact "topaz-ios".
+# The result is the artifact "topaz-ios".
+#
+# Same registration problem as mesa.yml: a workflow_dispatch-only file that has
+# never run in this repo is invisible to the API and the dispatch endpoint 404s.
 on:
   workflow_dispatch:
+  push:
+    branches: [rosy]
+    paths:
+      - '.github/workflows/topaz.yml'
+      - 'userland/gpu/**'
 
 jobs:
   build:
