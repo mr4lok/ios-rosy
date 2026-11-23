@@ -145,6 +145,11 @@ jobs:
           else
             echo "MISSING rosy panel size in SweetFramebuffer.cpp"; missing=1
           fi
+          if grep -q "in the GPU's pool at %#llx (%s)" dxb/xnu/iokit/Kernel/arm/SweetSurface.cpp; then
+            echo "ok   SweetSurface.cpp gives SpringBoard the GPU pool (1025)"
+          else
+            echo "MISSING the SpringBoard pool change in SweetSurface.cpp"; missing=1
+          fi
           [ -z "${missing:-}" ]
 
       - name: Package build tree for local compiles

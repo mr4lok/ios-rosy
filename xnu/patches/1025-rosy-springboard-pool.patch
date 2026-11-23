@@ -1,0 +1,80 @@
+From: rosy-port <ace@localhost>
+Date: Mon, 23 Nov 2026 14:20:00 +0530
+Subject: [PATCH] 1025 rosy: SpringBoard's screens from the GPU pool too
+
+boot43 (60 Hz panel) made the motion continuous but left a large touch-to-pixel
+latency.  The log names the cause:
+
+  SWEET SURF: SpringBoard create id 0 1125x2436 ... -> 0xe00002bd     (65 of 65)
+  SWEET SURF: CollectionsPoster create ... -> 0xe00002bd             (15 of 15)
+  vm_page_find_contiguous(num=2744,low=0): found 0 pages ...
+      scanned 178950 pages... zone_gc called...
+
+2744 pages is exactly 1125x2436x4.  SpringBoard draws its own UI into its
+screen-sized surfaces (the window server only composites them), but patch 0989
+gave the vince GPU pool to backboardd alone, so every SpringBoard screen fell
+through to the scanout path, which needs s->allocSize physically contiguous
+below 4 GiB.  It could not find it, the plain wired allocation failed after it,
+and the create returned NoMemory -- after an allocation attempt that scanned all
+of RAM and ran zone_gc.  That is the latency: not a slow renderer but a full
+memory scan per surface create, repeated for every retry.
+
+Give SpringBoard the pool memory the window server's own screens come from, and
+raise the pool's screen cap from 8 to 16 so the window server cannot fill it
+alone.  topaz tried the same and reverted it (applications' screen-sized
+surfaces came out black); on vince the pool surfaces are drawn in place with
+vincecache=1 doing the cache maintenance, which is the difference.
+
+Marker for CI: the pool log line now carries the process name.
+
+diff --git a/iokit/Kernel/arm/SweetSurface.cpp b/iokit/Kernel/arm/SweetSurface.cpp
+index 7190db0..31fa8e8 100644
+--- a/iokit/Kernel/arm/SweetSurface.cpp
++++ b/iokit/Kernel/arm/SweetSurface.cpp
+@@ -1113,7 +1113,15 @@ IOSurfaceRootUserClient::create(IOExternalMethodArguments *args)
+ 		char who[32];
+ 
+ 		proc_selfname(who, sizeof(who));
+-		if (strcmp(who, "backboardd") == 0) {
++		/*
++		 * rosy 1008: SpringBoard as well as the window server. SpringBoard draws its own UI
++		 * into its screen-sized surfaces (the window server only composites them), and with
++		 * the pool closed to it every 1125x2436 create failed: the scanout path had to find
++		 * s->allocSize physically contiguous below 4 GiB, could not, and the plain wired
++		 * allocation failed after it. Each attempt scanned all of RAM and called zone_gc --
++		 * that is the touch-to-pixel latency, not a slow renderer.
++		 */
++		if (strcmp(who, "backboardd") == 0 || strcmp(who, "SpringBoard") == 0) {
+ 			/* the GPU writes whole tiles: 64 rows past the picture have pages behind them (as for the topaz pool) */
+ 			uint64_t take = round_page_64(s->allocSize + 64ull * s->bytesPerRow);
+ 			uint64_t pa = vince_pool_alloc(take);
+@@ -1136,8 +1144,8 @@ IOSurfaceRootUserClient::create(IOExternalMethodArguments *args)
+ 				} else {
+ 					static uint32_t told;
+ 					if (told++ < 16) {
+-						IOLog("SWEET SURF: surface %ux%u (%llu bytes) in the GPU's pool at %#llx\n", s->width, s->height,
+-						    (unsigned long long)take, (unsigned long long)pa);
++						IOLog("SWEET SURF: surface %ux%u (%llu bytes) in the GPU's pool at %#llx (%s)\n", s->width, s->height,
++						    (unsigned long long)take, (unsigned long long)pa, who);
+ 					}
+ 				}
+ 			} else if (pa != 0) {
+diff --git a/iokit/Kernel/arm/VinceGPU.cpp b/iokit/Kernel/arm/VinceGPU.cpp
+index 136acd9..1acb400 100644
+--- a/iokit/Kernel/arm/VinceGPU.cpp
++++ b/iokit/Kernel/arm/VinceGPU.cpp
+@@ -529,8 +529,12 @@ vince_pool_alloc(uint64_t size)
+ 		return 0;
+ 	}
+ 	IOLockLock(gPoolLock);
+-	/* the buffers of the library need room too: the screens take at most 8 of the pool's 11 MiB pieces */
+-	if (gPlaceHeld < 8) {
++	/*
++	 * The buffers of the library need room too: a screen takes ~11.5 MiB of the pool's 192 MiB,
++	 * so 16 of them still leave ~8 MiB for those. rosy 1008: was 8, which the window server
++	 * alone could fill, so SpringBoard's screens were always refused.
++	 */
++	if (gPlaceHeld < 16) {
+ 		pa = poolAllocLocked(size, true);
+ 		if (pa != 0) {
+ 			gPlaceHeld++;
